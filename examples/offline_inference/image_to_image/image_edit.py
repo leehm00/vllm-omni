@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Edit an image with Qwen-Image-Edit.")
     parser.add_argument(
         "--model",
-        default="Qwen/Qwen-Image-Edit",
+        default="/data7/homie/models/Qwen-Image-Edit",
         help=(
             "Diffusion model name or local path. "
             "For multiple image inputs, use Qwen/Qwen-Image-Edit-2509 or later version "
