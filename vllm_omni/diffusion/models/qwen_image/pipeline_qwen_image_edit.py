@@ -649,9 +649,14 @@ class QwenImageEditPipeline(
                 noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
                 noise_pred = comb_pred * (cond_norm / noise_norm)
             # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
             if return_intermediate_latents:
-                intermediate_latents.append(latents)
+                sigma = self.scheduler.sigmas[i]
+                if isinstance(sigma, torch.Tensor):
+                    sigma = sigma.to(latents.device, dtype=latents.dtype)
+                pred_x0 = latents - sigma * noise_pred
+                intermediate_latents.append(pred_x0)
+
+            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
         if return_intermediate_latents:
             return latents, intermediate_latents
