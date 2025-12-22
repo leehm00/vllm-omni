@@ -44,7 +44,7 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-
+from attention_probe import AttentionProbe, install_probe
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.utils.platform_utils import detect_device_type, is_npu
@@ -215,7 +215,7 @@ def main():
             # Note: coefficients will use model-specific defaults based on model_type
             #       (e.g., QwenImagePipeline or FluxPipeline)
         }
-
+    probe = AttentionProbe(target_tokens=[5, 6], save_interval=5)
     # Initialize Omni with appropriate pipeline
     omni = Omni(
         model=args.model,
@@ -226,6 +226,8 @@ def main():
         parallel_config=parallel_config,
     )
     print("Pipeline loaded")
+
+    install_probe(omni.diffusion_worker.pipeline, probe)  # patch in-place
 
     # Time profiling for generation
     print(f"\n{'=' * 60}")
@@ -257,7 +259,7 @@ def main():
     )
     generation_end = time.perf_counter()
     generation_time = generation_end - generation_start
-
+    probe.save_step_grids(omni.diffusion_worker.pipeline, out_dir=".")
     # Print profiling results
     print(f"Total generation time: {generation_time:.4f} seconds ({generation_time * 1000:.2f} ms)")
 
