@@ -42,6 +42,7 @@ import os
 import time
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 from PIL import Image
 
@@ -303,6 +304,32 @@ def main():
                     save_path = trajectory_path / f"step_{step:03d}.png"
                 img.save(save_path)
         print(f"Saved trajectory images to {os.path.abspath(trajectory_path)}")
+
+    if output_obj.trajectory_metrics:
+        metrics = output_obj.trajectory_metrics
+        metrics_path = output_path.parent / f"{stem}_metrics.png"
+        
+        plt.figure(figsize=(12, 6))
+        
+        # Plot Cosine Similarity
+        plt.subplot(1, 2, 1)
+        plt.plot(metrics["cosine_similarity"], label="Cosine Similarity")
+        plt.xlabel("Step")
+        plt.ylabel("Similarity")
+        plt.title("Cosine Similarity between Consecutive Steps")
+        plt.grid(True)
+        
+        # Plot L2 Distance
+        plt.subplot(1, 2, 2)
+        plt.plot(metrics["l2_distance"], label="L2 Distance", color="orange")
+        plt.xlabel("Step")
+        plt.ylabel("Distance")
+        plt.title("L2 Distance between Consecutive Steps")
+        plt.grid(True)
+        
+        plt.tight_layout()
+        plt.savefig(metrics_path)
+        print(f"Saved metrics plot to {os.path.abspath(metrics_path)}")
 
 
 if __name__ == "__main__":

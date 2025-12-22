@@ -873,6 +873,22 @@ class QwenImageEditPipeline(
                 decoded_trajectory.append(self.decode_latents(l, height, width))
             diffusion_output.trajectory_decoded = decoded_trajectory
 
+        if intermediate_latents is not None and len(intermediate_latents) > 1:
+            metrics = {"cosine_similarity": [], "l2_distance": []}
+            for i in range(1, len(intermediate_latents)):
+                prev = intermediate_latents[i - 1].flatten()
+                curr = intermediate_latents[i].flatten()
+                
+                # Cosine similarity
+                cos_sim = torch.nn.functional.cosine_similarity(prev.unsqueeze(0), curr.unsqueeze(0)).item()
+                metrics["cosine_similarity"].append(cos_sim)
+                
+                # L2 distance
+                l2_dist = torch.norm(prev - curr).item()
+                metrics["l2_distance"].append(l2_dist)
+            
+            diffusion_output.trajectory_metrics = metrics
+
         return diffusion_output
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
