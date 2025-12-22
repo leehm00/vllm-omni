@@ -49,10 +49,15 @@ class DiffusionEngine:
 
             postprocess_start_time = time.time()
             result = self.post_process_func(output.output) if self.post_process_func is not None else output.output
+
+            if output.trajectory_decoded and self.post_process_func is not None:
+                 output.trajectory_decoded = [self.post_process_func(t) for t in output.trajectory_decoded]
+
             postprocess_time = time.time() - postprocess_start_time
             logger.info(f"Post-processing completed in {postprocess_time:.4f} seconds")
 
-            return result
+            output.output = result
+            return output
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             return None

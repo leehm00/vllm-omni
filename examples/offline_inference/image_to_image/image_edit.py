@@ -44,7 +44,7 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-from attention_probe import AttentionProbe, install_probe
+
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.utils.platform_utils import detect_device_type, is_npu
@@ -158,6 +158,12 @@ def parse_args() -> argparse.Namespace:
         help="For Qwen-Image-Layered, set to RGBA.",
     )
 
+    parser.add_argument(
+        "--save_every_step",
+        action="store_true",
+        help="Save the image at every step of the diffusion process.",
+    )
+
     return parser.parse_args()
 
 
@@ -215,7 +221,7 @@ def main():
             # Note: coefficients will use model-specific defaults based on model_type
             #       (e.g., QwenImagePipeline or FluxPipeline)
         }
-    probe = AttentionProbe(target_tokens=[5, 6], save_interval=5)
+
     # Initialize Omni with appropriate pipeline
     omni = Omni(
         model=args.model,
@@ -226,8 +232,6 @@ def main():
         parallel_config=parallel_config,
     )
     print("Pipeline loaded")
-
-    install_probe(omni.diffusion_worker.pipeline, probe)  # patch in-place
 
     # Time profiling for generation
     print(f"\n{'=' * 60}")
@@ -246,7 +250,7 @@ def main():
 
     generation_start = time.perf_counter()
     # Generate edited image
-    images = omni.generate(
+    output_obj = omni.generate(
         prompt=args.prompt,
         pil_image=input_image,
         negative_prompt=args.negative_prompt,
@@ -256,10 +260,12 @@ def main():
         num_inference_steps=args.num_inference_steps,
         num_outputs_per_prompt=args.num_outputs_per_prompt,
         layers=args.layers,
+        return_trajectory_decoded=args.save_every_step,
     )
+    images = output_obj.output
     generation_end = time.perf_counter()
     generation_time = generation_end - generation_start
-    probe.save_step_grids(omni.diffusion_worker.pipeline, out_dir=".")
+
     # Print profiling results
     print(f"Total generation time: {generation_time:.4f} seconds ({generation_time * 1000:.2f} ms)")
 
@@ -283,6 +289,20 @@ def main():
                 save_path = output_path.parent / f"{stem}_{idx}_{sub_idx}{suffix}"
                 sub_img.save(save_path)
                 print(f"Saved edited image to {os.path.abspath(save_path)}")
+
+    if args.save_every_step and output_obj.trajectory_decoded:
+        trajectory_path = output_path.parent / f"{stem}_trajectory"
+        trajectory_path.mkdir(parents=True, exist_ok=True)
+
+        for step, step_images in enumerate(output_obj.trajectory_decoded):
+            step_images = step_images if isinstance(step_images, list) else [step_images]
+            for idx, img in enumerate(step_images):
+                if len(step_images) > 1:
+                    save_path = trajectory_path / f"step_{step:03d}_{idx}.png"
+                else:
+                    save_path = trajectory_path / f"step_{step:03d}.png"
+                img.save(save_path)
+        print(f"Saved trajectory images to {os.path.abspath(trajectory_path)}")
 
 
 if __name__ == "__main__":

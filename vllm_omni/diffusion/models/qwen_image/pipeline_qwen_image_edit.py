@@ -331,7 +331,7 @@ class QwenImageEditPipeline(
             input_ids=model_inputs.input_ids,
             attention_mask=model_inputs.attention_mask,
             pixel_values=model_inputs.pixel_values,
-            image_grid_thw=model_inputs.image_grid_thw,
+            image_grid_thw=model_inputs.image_grid_thw
             output_hidden_states=True,
         )
 
@@ -589,8 +589,10 @@ class QwenImageEditPipeline(
         do_true_cfg,
         guidance,
         true_cfg_scale,
+        return_intermediate_latents=False,
     ):
         """Diffusion loop with optional image conditioning."""
+        intermediate_latents = []
         self.scheduler.set_begin_index(0)
         for i, t in enumerate(timesteps):
             if self.interrupt:
@@ -648,7 +650,27 @@ class QwenImageEditPipeline(
                 noise_pred = comb_pred * (cond_norm / noise_norm)
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            if return_intermediate_latents:
+                intermediate_latents.append(latents)
+
+        if return_intermediate_latents:
+            return latents, intermediate_latents
         return latents
+
+    def decode_latents(self, latents, height, width):
+        latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+        latents = latents.to(self.vae.dtype)
+        latents_mean = (
+            torch.tensor(self.vae.config.latents_mean)
+            .view(1, self.vae.config.z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
+        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
+            latents.device, latents.dtype
+        )
+        latents = latents / latents_std + latents_mean
+        image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
+        return image
 
     def forward(
         self,
@@ -804,7 +826,9 @@ class QwenImageEditPipeline(
             negative_prompt_embeds_mask.sum(dim=1).tolist() if negative_prompt_embeds_mask is not None else None
         )
 
-        latents = self.diffuse(
+        return_intermediate_latents = req.return_trajectory_latents or req.return_trajectory_decoded
+
+        latents_or_tuple = self.diffuse(
             prompt_embeds,
             prompt_embeds_mask,
             negative_prompt_embeds,
@@ -818,26 +842,33 @@ class QwenImageEditPipeline(
             do_true_cfg,
             guidance,
             true_cfg_scale,
+            return_intermediate_latents=return_intermediate_latents,
         )
+
+        if return_intermediate_latents:
+            latents, intermediate_latents = latents_or_tuple
+        else:
+            latents = latents_or_tuple
+            intermediate_latents = None
 
         self._current_timestep = None
         if output_type == "latent":
             image = latents
         else:
-            latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
-            latents = latents.to(self.vae.dtype)
-            latents_mean = (
-                torch.tensor(self.vae.config.latents_mean)
-                .view(1, self.vae.config.z_dim, 1, 1, 1)
-                .to(latents.device, latents.dtype)
-            )
-            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-                latents.device, latents.dtype
-            )
-            latents = latents / latents_std + latents_mean
-            image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
+            image = self.decode_latents(latents, height, width)
 
-        return DiffusionOutput(output=image)
+        diffusion_output = DiffusionOutput(output=image)
+
+        if req.return_trajectory_latents and intermediate_latents is not None:
+            diffusion_output.trajectory_latents = torch.stack(intermediate_latents)
+
+        if req.return_trajectory_decoded and intermediate_latents is not None:
+            decoded_trajectory = []
+            for l in intermediate_latents:
+                decoded_trajectory.append(self.decode_latents(l, height, width))
+            diffusion_output.trajectory_decoded = decoded_trajectory
+
+        return diffusion_output
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
