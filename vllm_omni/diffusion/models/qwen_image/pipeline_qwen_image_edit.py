@@ -331,7 +331,7 @@ class QwenImageEditPipeline(
             input_ids=model_inputs.input_ids,
             attention_mask=model_inputs.attention_mask,
             pixel_values=model_inputs.pixel_values,
-            image_grid_thw=model_inputs.image_grid_thw
+            image_grid_thw=model_inputs.image_grid_thw,
             output_hidden_states=True,
         )
 
