@@ -75,11 +75,33 @@ class Attention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         attn_metadata: AttentionMetadata = None,
+        return_attn_weights: bool = False,
     ) -> torch.Tensor:
         if self.use_ulysses:
             return self._forward_ulysses(query, key, value, attn_metadata)
         else:
             # shape: (batch_size, seq_len, num_heads, head_size)
+            if return_attn_weights:
+                # Assuming self.attention.forward supports return_attn_weights or we need to modify it
+                # For now, let's assume standard scaled_dot_product_attention usage in backend
+                # If backend doesn't support it, we might need to implement manual attention here for visualization
+                
+                # Manual attention implementation for visualization support
+                B, L, H, D = query.shape
+                scale = self.softmax_scale
+                
+                q = query.transpose(1, 2)  # (B, H, L, D)
+                k = key.transpose(1, 2)    # (B, H, S, D)
+                v = value.transpose(1, 2)  # (B, H, S, D)
+                
+                attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
+                attn_weights = attn_weights.softmax(dim=-1)
+                
+                attn_output = torch.matmul(attn_weights, v)
+                attn_output = attn_output.transpose(1, 2)
+                
+                return attn_output, attn_weights
+            
             attn_output = self.attention.forward(query, key, value, attn_metadata)
             return attn_output
 

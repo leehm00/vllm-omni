@@ -622,6 +622,11 @@ class QwenImageEditPipeline(
             if self._cache_backend is not None:
                 transformer_kwargs["cache_branch"] = "positive"
 
+            # Set current step for attention visualization
+            for block in self.transformer.transformer_blocks:
+                block.attn.current_step = i
+                block.attn.save_attention_map = return_intermediate_latents
+
             noise_pred = self.transformer(**transformer_kwargs)[0]
             noise_pred = noise_pred[:, : latents.size(1)]
 
