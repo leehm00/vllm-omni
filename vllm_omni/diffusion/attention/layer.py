@@ -103,12 +103,30 @@ class Attention(nn.Module):
                 step = getattr(self, "current_step", 0)
                 os.makedirs(save_dir, exist_ok=True)
                 
-                plt.figure(figsize=(10, 10))
+                plt.figure(figsize=(12, 10))
                 # Use log scale to highlight small values
                 attn_map = attn_weights[0, 0].detach().float().cpu()
                 plt.imshow(torch.log(attn_map + 1e-6).numpy(), cmap='viridis')
                 plt.colorbar()
                 plt.title(f"Log Attention Map Step {step}")
+
+                # Draw token boundaries
+                token_ranges = getattr(self, "token_ranges", None)
+                if token_ranges:
+                    colors = ['red', 'white', 'orange']
+                    for i, (name, (start, end)) in enumerate(token_ranges.items()):
+                        color = colors[i % len(colors)]
+                        # Draw vertical lines (only end to avoid clutter, start is 0 or prev end)
+                        if start > 0:
+                            plt.axvline(x=start, color=color, linestyle='--', alpha=0.5)
+                            plt.axhline(y=start, color=color, linestyle='--', alpha=0.5)
+                        
+                        # Add text label
+                        mid = (start + end) / 2
+                        # Place label on the diagonal
+                        if mid < attn_map.shape[0]:
+                             plt.text(mid, mid, name, color=color, ha='center', va='center', rotation=45, fontsize=8, fontweight='bold', bbox=dict(facecolor='black', alpha=0.5, edgecolor='none'))
+
                 plt.savefig(os.path.join(save_dir, f"attn_map_step_{step:03d}.png"))
                 plt.close()
                 
