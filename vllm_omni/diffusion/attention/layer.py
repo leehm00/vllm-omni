@@ -92,6 +92,11 @@ class Attention(nn.Module):
                 
                 attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
                 attn_weights = attn_weights.softmax(dim=-1)
+
+                # Debug prints
+                sums = attn_weights.sum(dim=-1)
+                print(f"Step {getattr(self, 'current_step', 0)} Attention Sums - Min: {sums.min().item()}, Max: {sums.max().item()}, Mean: {sums.mean().item()}")
+                print(f"Step {getattr(self, 'current_step', 0)} Attention Values - Max: {attn_weights.max().item()}, Min: {attn_weights.min().item()}")
                 
                 # Plot and save
                 save_dir = getattr(self, "save_dir", "outputs")
