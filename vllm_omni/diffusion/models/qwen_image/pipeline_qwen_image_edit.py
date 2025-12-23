@@ -403,6 +403,34 @@ class QwenImageEditPipeline(
 
         prompt_embeds = prompt_embeds.to(dtype=dtype)
 
+        # --- Added Debug Info ---
+        try:
+            input_ids = model_inputs.input_ids[0]
+            vision_start_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+            vision_end_id = self.tokenizer.convert_tokens_to_ids("<|vision_end|>")
+            
+            vision_start_indices = (input_ids == vision_start_id).nonzero(as_tuple=True)[0]
+            vision_end_indices = (input_ids == vision_end_id).nonzero(as_tuple=True)[0]
+            
+            if len(vision_start_indices) > 0 and len(vision_end_indices) > 0:
+                v_start = vision_start_indices[0].item()
+                v_end = vision_end_indices[0].item()
+                
+                drop_idx = self.prompt_template_encode_start_idx
+                
+                # Calculate ranges in the final prompt_embeds
+                eff_v_start = max(0, v_start - drop_idx)
+                eff_v_end = max(0, v_end - drop_idx)
+                
+                print(f"\n[Token Mapping Info]")
+                print(f"Condition Sequence (Text + Input Image) Length: {prompt_embeds.shape[1]}")
+                print(f"  - System/Prefix: [0, {eff_v_start})")
+                print(f"  - Input Image:   [{eff_v_start}, {eff_v_end}] (Length: {eff_v_end - eff_v_start + 1})")
+                print(f"  - User Prompt:   ({eff_v_end}, {prompt_embeds.shape[1]})")
+        except Exception as e:
+            print(f"Could not determine token mapping: {e}")
+        # ------------------------
+
         return prompt_embeds, encoder_attention_mask
 
     def encode_prompt(
@@ -599,6 +627,18 @@ class QwenImageEditPipeline(
         return_intermediate_latents=False,
     ):
         """Diffusion loop with optional image conditioning."""
+        
+        # --- Added Debug Info ---
+        print(f"\n[Generation Info]")
+        print(f"Generation Sequence (Output Image) Length: {latents.shape[1]}")
+        cond_len = prompt_embeds.shape[1]
+        gen_len = latents.shape[1]
+        total_len = cond_len + gen_len
+        print(f"Total Attention Map Size: {total_len} x {total_len}")
+        print(f"  - Condition (Text + Input Image): [0, {cond_len})")
+        print(f"  - Generation (Output Image):      [{cond_len}, {total_len})")
+        # ------------------------
+
         intermediate_latents = []
         self.scheduler.set_begin_index(0)
         for i, t in enumerate(timesteps):
