@@ -594,6 +594,7 @@ class QwenImageEditPipeline(
         """Diffusion loop with optional image conditioning."""
         intermediate_latents = []
         self.scheduler.set_begin_index(0)
+        prev_pred_x0 = None
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -649,11 +650,18 @@ class QwenImageEditPipeline(
                 noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
                 noise_pred = comb_pred * (cond_norm / noise_norm)
             # compute the previous noisy sample x_t -> x_t-1
+            sigma = self.scheduler.sigmas[i]
+            if isinstance(sigma, torch.Tensor):
+                sigma = sigma.to(latents.device, dtype=latents.dtype)
+            pred_x0 = latents - sigma * noise_pred
+
+            if prev_pred_x0 is not None:
+                diff = torch.abs(pred_x0 - prev_pred_x0)
+                top100_indices = torch.topk(diff.flatten(), 100).indices
+                print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
+            prev_pred_x0 = pred_x0
+
             if return_intermediate_latents:
-                sigma = self.scheduler.sigmas[i]
-                if isinstance(sigma, torch.Tensor):
-                    sigma = sigma.to(latents.device, dtype=latents.dtype)
-                pred_x0 = latents - sigma * noise_pred
                 intermediate_latents.append(pred_x0)
 
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
