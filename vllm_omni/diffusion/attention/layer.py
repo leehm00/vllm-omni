@@ -9,6 +9,8 @@
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import matplotlib.pyplot as plt
+import os
 from torch import Tensor
 
 from vllm_omni.diffusion.attention.backends.abstract import (
@@ -77,6 +79,35 @@ class Attention(nn.Module):
         attn_metadata: AttentionMetadata = None,
         return_attn_weights: bool = False,
     ) -> torch.Tensor:
+        if getattr(self, "save_attention_map", False):
+            try:
+                # Manual attention computation for visualization
+                B, L, H, D = query.shape
+                scale = self.softmax_scale
+                
+                # Use the first head for visualization to save memory
+                q = query[0, :, 0, :].unsqueeze(0).unsqueeze(1)  # (1, 1, L, D)
+                k = key[0, :, 0, :].unsqueeze(0).unsqueeze(1)    # (1, 1, S, D)
+                
+                attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
+                attn_weights = attn_weights.softmax(dim=-1)
+                
+                # Plot and save
+                save_dir = getattr(self, "save_dir", "outputs")
+                step = getattr(self, "current_step", 0)
+                os.makedirs(save_dir, exist_ok=True)
+                
+                plt.figure(figsize=(10, 10))
+                plt.imshow(attn_weights[0, 0].detach().cpu().numpy(), cmap='viridis')
+                plt.colorbar()
+                plt.title(f"Attention Map Step {step}")
+                plt.savefig(os.path.join(save_dir, f"attn_map_step_{step:03d}.png"))
+                plt.close()
+                
+                del attn_weights, q, k
+            except Exception as e:
+                print(f"Failed to save attention map: {e}")
+
         if self.use_ulysses:
             return self._forward_ulysses(query, key, value, attn_metadata)
         else:

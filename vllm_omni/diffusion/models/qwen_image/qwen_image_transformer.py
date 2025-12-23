@@ -6,10 +6,6 @@ from collections.abc import Iterable
 from math import prod
 from typing import Any
 
-import os
-import matplotlib.pyplot as plt
-import math
-
 import torch
 import torch.nn as nn
 from diffusers.models.attention import FeedForward
@@ -298,12 +294,10 @@ class QwenImageCrossAttention(nn.Module):
         context_pre_only: bool = False,
         parallel_attention=False,
         out_dim: int = None,
-        layer_idx: int = -1,
     ) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
-        self.layer_idx = layer_idx
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.window_size = window_size
@@ -410,48 +404,11 @@ class QwenImageCrossAttention(nn.Module):
         joint_value = torch.cat([txt_value, img_value], dim=1)
 
         # Compute joint attention
-        joint_hidden_states, attn_weights = self.attn(
+        joint_hidden_states = self.attn(
             joint_query,
             joint_key,
             joint_value,
-            return_attn_weights=True,
         )
-
-        # Visualize attention map if needed
-        if hasattr(self, "save_attention_map") and self.save_attention_map:
-            # attn_weights shape: [batch_size, num_heads, seq_len_q, seq_len_k]
-            # seq_len_q = seq_len_k = seq_len_txt + seq_len_img
-            
-            # We want to visualize the attention from image tokens (query) to text tokens (key)
-            # Image tokens are at indices [seq_len_txt:]
-            # Text tokens are at indices [:seq_len_txt]
-            
-            # Take the first item in batch and average over heads
-            # attn_map shape: [seq_len_img, seq_len_txt]
-            attn_map = attn_weights[0].mean(dim=0)[seq_len_txt:, :seq_len_txt]
-            
-            # Save the attention map
-            save_dir = "attention_maps"
-            os.makedirs(save_dir, exist_ok=True)
-            
-            # Assuming square image for visualization simplicity
-            seq_len_img = attn_map.shape[0]
-            side = int(math.sqrt(seq_len_img))
-            
-            if side * side == seq_len_img:
-                # Reshape to [height, width, seq_len_txt]
-                attn_map_reshaped = attn_map.view(side, side, -1)
-                
-                # Sum over text tokens to get overall attention intensity per pixel
-                overall_attn = attn_map_reshaped.sum(dim=-1).float().cpu().numpy()
-                
-                plt.figure(figsize=(10, 10))
-                plt.imshow(overall_attn, cmap='viridis')
-                plt.colorbar()
-                plt.title(f'Layer {self.layer_idx} Image-to-Text Attention')
-                plt.savefig(os.path.join(save_dir, f'layer_{self.layer_idx}_step_{self.current_step}_attn.png'))
-                plt.close()
-
         joint_hidden_states = joint_hidden_states.flatten(2, 3)
         joint_hidden_states = joint_hidden_states.to(joint_query.dtype)
 
@@ -478,7 +435,6 @@ class QwenImageTransformerBlock(nn.Module):
         qk_norm: str = "rms_norm",
         eps: float = 1e-6,
         zero_cond_t: bool = False,
-        layer_idx: int = -1,
     ):
         super().__init__()
 
@@ -498,7 +454,6 @@ class QwenImageTransformerBlock(nn.Module):
             added_kv_proj_dim=dim,
             context_pre_only=False,
             head_dim=attention_head_dim,
-            layer_idx=layer_idx,
         )
         self.img_norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
         self.img_mlp = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
@@ -694,9 +649,8 @@ class QwenImageTransformer2DModel(nn.Module):
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
                     zero_cond_t=zero_cond_t,
-                    layer_idx=i,
                 )
-                for i in range(num_layers)
+                for _ in range(num_layers)
             ]
         )
 

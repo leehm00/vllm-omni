@@ -243,6 +243,13 @@ class QwenImageEditPipeline(
         self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"  # noqa: E501
         self.prompt_template_encode_start_idx = 64
         self.default_sample_size = 128
+        
+        # Configure last layer for attention visualization
+        if hasattr(self.transformer, "transformer_blocks"):
+            self.last_attn = self.transformer.transformer_blocks[-1].attn.attn
+            self.last_attn.save_attention_map = True
+        else:
+            self.last_attn = None
 
     def check_inputs(
         self,
@@ -598,6 +605,10 @@ class QwenImageEditPipeline(
             if self.interrupt:
                 continue
             self._current_timestep = t
+            
+            if self.last_attn is not None:
+                self.last_attn.current_step = i
+                
             # broadcast to batch dimension and place on same device/dtype as latents
             timestep = t.expand(latents.shape[0]).to(device=latents.device, dtype=latents.dtype)
 
@@ -621,11 +632,6 @@ class QwenImageEditPipeline(
             }
             if self._cache_backend is not None:
                 transformer_kwargs["cache_branch"] = "positive"
-
-            # Set current step for attention visualization
-            for block in self.transformer.transformer_blocks:
-                block.attn.current_step = i
-                block.attn.save_attention_map = return_intermediate_latents
 
             noise_pred = self.transformer(**transformer_kwargs)[0]
             noise_pred = noise_pred[:, : latents.size(1)]
@@ -830,6 +836,21 @@ class QwenImageEditPipeline(
 
         if self.attention_kwargs is None:
             self._attention_kwargs = {}
+            
+        # Set output directory for attention maps
+        if self.last_attn is not None and req.return_trajectory_decoded:
+            # Use the same directory structure as trajectory images
+            # req.output_path is usually "outputs/" or similar
+            # We need to construct a path based on the output filename if possible
+            # But here we only have req.output_path which might be generic
+            # Let's try to use a subdirectory in the current working directory or req.output_path
+            
+            # Try to infer a good path from request info if available, otherwise default
+            base_dir = req.output_path if req.output_path else "outputs"
+            self.last_attn.save_dir = os.path.join(base_dir, "attention_maps")
+            self.last_attn.save_attention_map = True
+        elif self.last_attn is not None:
+            self.last_attn.save_attention_map = False
 
         txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist() if prompt_embeds_mask is not None else None
         negative_txt_seq_lens = (
