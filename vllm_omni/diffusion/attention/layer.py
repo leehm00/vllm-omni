@@ -104,9 +104,11 @@ class Attention(nn.Module):
                 os.makedirs(save_dir, exist_ok=True)
                 
                 plt.figure(figsize=(10, 10))
-                plt.imshow(attn_weights[0, 0].detach().cpu().numpy(), cmap='viridis')
+                # Use log scale to highlight small values
+                attn_map = attn_weights[0, 0].detach().float().cpu()
+                plt.imshow(torch.log(attn_map + 1e-6).numpy(), cmap='viridis')
                 plt.colorbar()
-                plt.title(f"Attention Map Step {step}")
+                plt.title(f"Log Attention Map Step {step}")
                 plt.savefig(os.path.join(save_dir, f"attn_map_step_{step:03d}.png"))
                 plt.close()
                 
