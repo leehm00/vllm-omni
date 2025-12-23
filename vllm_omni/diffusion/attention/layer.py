@@ -86,8 +86,9 @@ class Attention(nn.Module):
                 scale = self.softmax_scale
                 
                 # Use the first head for visualization to save memory
-                q = query[0, :, 0, :].unsqueeze(0).unsqueeze(1)  # (1, 1, L, D)
-                k = key[0, :, 0, :].unsqueeze(0).unsqueeze(1)    # (1, 1, S, D)
+                # Convert to float32 for numerical stability
+                q = query[0, :, 0, :].to(dtype=torch.float32).unsqueeze(0).unsqueeze(1)  # (1, 1, L, D)
+                k = key[0, :, 0, :].to(dtype=torch.float32).unsqueeze(0).unsqueeze(1)    # (1, 1, S, D)
                 
                 attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
                 attn_weights = attn_weights.softmax(dim=-1)
@@ -98,7 +99,7 @@ class Attention(nn.Module):
                 os.makedirs(save_dir, exist_ok=True)
                 
                 plt.figure(figsize=(10, 10))
-                plt.imshow(attn_weights[0, 0].detach().float().cpu().numpy(), cmap='viridis')
+                plt.imshow(attn_weights[0, 0].detach().cpu().numpy(), cmap='viridis')
                 plt.colorbar()
                 plt.title(f"Attention Map Step {step}")
                 plt.savefig(os.path.join(save_dir, f"attn_map_step_{step:03d}.png"))
