@@ -661,6 +661,31 @@ class QwenImageEditPipeline(
                 print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
             prev_pred_x0 = pred_x0
 
+            if image_latents is not None:
+                # Calculate absolute difference between pred_x0 and image_latents
+                diff_abs = torch.abs(pred_x0 - image_latents)
+                # Sum over channel dimension to get heatmap values: (B, L)
+                diff_map = diff_abs.sum(dim=-1)
+
+                import matplotlib.pyplot as plt
+                os.makedirs("heatmaps", exist_ok=True)
+
+                for b in range(diff_map.shape[0]):
+                    # Retrieve grid dimensions from img_shapes
+                    # img_shapes[b][0] is (1, grid_h, grid_w)
+                    grid_h = img_shapes[b][0][1]
+                    grid_w = img_shapes[b][0][2]
+                    
+                    # Reshape to 2D grid
+                    heatmap = diff_map[b].reshape(grid_h, grid_w).float().cpu().detach().numpy()
+                    
+                    plt.figure(figsize=(8, 8))
+                    plt.imshow(heatmap, cmap='viridis')
+                    plt.colorbar()
+                    plt.title(f"Step {i} |pred_x0 - image_latents|")
+                    plt.savefig(f"heatmaps/diff_step_{i:03d}_batch_{b}.png")
+                    plt.close()
+
             if return_intermediate_latents:
                 intermediate_latents.append(pred_x0)
 
