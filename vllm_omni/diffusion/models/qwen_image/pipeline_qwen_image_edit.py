@@ -676,8 +676,15 @@ class QwenImageEditPipeline(
                     plt.savefig(f"heatmaps/diff_step_delta_{i:03d}_batch_{b}.png")
                     plt.close()
 
-                top100_indices = torch.topk(diff.flatten(), 100).indices
-                print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
+                    # Plot histogram for step difference
+                    plt.figure(figsize=(8, 6))
+                    plt.hist(heatmap_step.flatten(), bins=50, color='green', alpha=0.7)
+                    plt.title(f"Step {i} Histogram of |pred_x0_t - pred_x0_t-1|")
+                    plt.xlabel("Difference Value")
+                    plt.ylabel("Frequency")
+                    plt.savefig(f"heatmaps/hist_step_delta_{i:03d}_batch_{b}.png")
+                    plt.close()
+
             prev_pred_x0 = pred_x0
 
             if image_latents is not None:
