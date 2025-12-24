@@ -249,12 +249,6 @@ def main():
     print(f"  Parallel configuration: ulysses_degree={args.ulysses_degree}")
     print(f"{'=' * 60}\n")
 
-    # Set heatmap output directory environment variable
-    output_path = Path(args.output)
-    heatmap_dir = output_path.parent / (output_path.stem + "_heatmaps")
-    os.environ["HEATMAP_OUTPUT_DIR"] = str(heatmap_dir)
-    print(f"Heatmaps will be saved to: {heatmap_dir}")
-
     generation_start = time.perf_counter()
     # Generate edited image
     output_obj = omni.generate(
