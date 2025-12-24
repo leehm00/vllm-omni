@@ -686,6 +686,15 @@ class QwenImageEditPipeline(
                     plt.savefig(f"heatmaps/diff_step_{i:03d}_batch_{b}.png")
                     plt.close()
 
+                    # Plot histogram
+                    plt.figure(figsize=(8, 6))
+                    plt.hist(heatmap.flatten(), bins=50, color='blue', alpha=0.7)
+                    plt.title(f"Step {i} Histogram of |pred_x0 - image_latents|")
+                    plt.xlabel("Difference Value")
+                    plt.ylabel("Frequency")
+                    plt.savefig(f"heatmaps/hist_step_{i:03d}_batch_{b}.png")
+                    plt.close()
+
             if return_intermediate_latents:
                 intermediate_latents.append(pred_x0)
 
