@@ -668,7 +668,8 @@ class QwenImageEditPipeline(
                 diff_map = diff_abs.sum(dim=-1)
 
                 import matplotlib.pyplot as plt
-                os.makedirs("heatmaps", exist_ok=True)
+                heatmap_dir = os.environ.get("HEATMAP_OUTPUT_DIR", "heatmaps")
+                os.makedirs(heatmap_dir, exist_ok=True)
 
                 for b in range(diff_map.shape[0]):
                     # Retrieve grid dimensions from img_shapes
@@ -683,7 +684,7 @@ class QwenImageEditPipeline(
                     plt.imshow(heatmap, cmap='viridis')
                     plt.colorbar()
                     plt.title(f"Step {i} |pred_x0 - image_latents|")
-                    plt.savefig(f"heatmaps/diff_step_{i:03d}_batch_{b}.png")
+                    plt.savefig(os.path.join(heatmap_dir, f"diff_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
             if return_intermediate_latents:
