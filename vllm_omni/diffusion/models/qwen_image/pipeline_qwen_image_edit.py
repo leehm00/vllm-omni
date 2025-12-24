@@ -658,7 +658,34 @@ class QwenImageEditPipeline(
             if prev_pred_x0 is not None:
                 diff = torch.abs(pred_x0 - prev_pred_x0)
                 top100_indices = torch.topk(diff.flatten(), 100).indices
-                # print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
+                print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
+
+                # Visualization for inter-step difference
+                import matplotlib.pyplot as plt
+                import os
+                os.makedirs("heatmaps", exist_ok=True)
+                
+                diff_step_map = diff.sum(dim=-1)
+                for b in range(diff_step_map.shape[0]):
+                    grid_h = img_shapes[b][0][1]
+                    grid_w = img_shapes[b][0][2]
+                    
+                    heatmap_step = diff_step_map[b].reshape(grid_h, grid_w).float().cpu().detach().numpy()
+                    
+                    plt.figure(figsize=(8, 8))
+                    plt.imshow(heatmap_step, cmap='viridis')
+                    plt.colorbar()
+                    plt.title(f"Step {i} |pred_x0_t - pred_x0_{{t-1}}|")
+                    plt.savefig(f"heatmaps/diff_inter_step_{i:03d}_batch_{b}.png")
+                    plt.close()
+
+                    plt.figure(figsize=(8, 6))
+                    plt.hist(heatmap_step.flatten(), bins=50, color='green', alpha=0.7)
+                    plt.title(f"Step {i} Histogram of |pred_x0_t - pred_x0_{{t-1}}|")
+                    plt.xlabel("Difference Value")
+                    plt.ylabel("Frequency")
+                    plt.savefig(f"heatmaps/hist_inter_step_{i:03d}_batch_{b}.png")
+                    plt.close()
             prev_pred_x0 = pred_x0
 
             if image_latents is not None:
