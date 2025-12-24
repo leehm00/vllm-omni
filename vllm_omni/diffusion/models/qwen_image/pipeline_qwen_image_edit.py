@@ -658,7 +658,7 @@ class QwenImageEditPipeline(
             if prev_pred_x0 is not None:
                 diff = torch.abs(pred_x0 - prev_pred_x0)
                 top100_indices = torch.topk(diff.flatten(), 100).indices
-                print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
+                # print(f"Step {i} top 100 diff indices: {top100_indices.tolist()}")
             prev_pred_x0 = pred_x0
 
             if image_latents is not None:
