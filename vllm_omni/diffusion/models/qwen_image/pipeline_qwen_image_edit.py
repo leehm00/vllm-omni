@@ -655,6 +655,13 @@ class QwenImageEditPipeline(
                 sigma = sigma.to(latents.device, dtype=latents.dtype)
             pred_x0 = latents - sigma * noise_pred
 
+            if i == 0:
+                print(f"pred_x0 shape: {pred_x0.shape}")
+                print(f"Dimension explanation: (Batch_Size, Sequence_Length, Hidden_Dim)")
+                print(f"  - Batch_Size: Number of images in batch")
+                print(f"  - Sequence_Length: Height/(2*Scale) * Width/(2*Scale) (packed tokens)")
+                print(f"  - Hidden_Dim: Latent_Channels * 4 (packed channels)")
+
             if prev_pred_x0 is not None:
                 diff = torch.abs(pred_x0 - prev_pred_x0)
                 
