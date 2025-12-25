@@ -661,6 +661,8 @@ class QwenImageEditPipeline(
                 print(f"  - Batch_Size: Number of images in batch")
                 print(f"  - Sequence_Length: Height/(2*Scale) * Width/(2*Scale) (packed tokens)")
                 print(f"  - Hidden_Dim: Latent_Channels * 4 (packed channels)")
+                print(f"Model Channels (in_channels): {self.transformer.in_channels}")
+                print(f"Transformer Layers: {len(self.transformer.transformer_blocks)}")
 
             if prev_pred_x0 is not None:
                 diff = torch.abs(pred_x0 - prev_pred_x0)
