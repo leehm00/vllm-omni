@@ -619,11 +619,15 @@ class QwenImageEditPipeline(
                 "txt_seq_lens": txt_seq_lens,
                 "attention_kwargs": self.attention_kwargs,
                 "return_dict": False,
+                "return_intermediate": True,
             }
             if self._cache_backend is not None:
                 transformer_kwargs["cache_branch"] = "positive"
 
-            noise_pred = self.transformer(**transformer_kwargs)[0]
+            out = self.transformer(**transformer_kwargs)
+            noise_pred = out[0]
+            current_layer_outputs = [x.detach() for x in out[1]] # Detach to save memory
+            
             noise_pred = noise_pred[:, : latents.size(1)]
 
             # Forward pass for negative prompt (CFG)
@@ -665,6 +669,39 @@ class QwenImageEditPipeline(
                 print(f"Transformer Layers: {len(self.transformer.transformer_blocks)}")
                 print(f"Structure of one Transformer Block (Layer 0):")
                 print(self.transformer.transformer_blocks[0])
+                
+            # Visualization Logic for Transformer Layers
+            import matplotlib.pyplot as plt
+            os.makedirs("heatmaps", exist_ok=True)
+            
+            def plot_heatmap(diff_tensor, title, filename, img_shapes):
+                 # diff_tensor: (B, L, D) -> sum(dim=-1) -> (B, L)
+                 diff_map = diff_tensor.sum(dim=-1)
+                 for b in range(diff_map.shape[0]):
+                    grid_h = img_shapes[b][0][1]
+                    grid_w = img_shapes[b][0][2]
+                    heatmap = diff_map[b].reshape(grid_h, grid_w).float().cpu().detach().numpy()
+                    plt.figure(figsize=(8, 8))
+                    plt.imshow(heatmap, cmap='viridis')
+                    plt.colorbar()
+                    plt.title(title)
+                    plt.savefig(filename + f"_batch_{b}.png")
+                    plt.close()
+
+            # 1. Layer vs Layer (Current Step)
+            # Compare layer l with layer l-1
+            for l in range(1, len(current_layer_outputs)):
+                diff = torch.abs(current_layer_outputs[l] - current_layer_outputs[l-1])
+                plot_heatmap(diff, f"Step {i} Layer {l} vs {l-1}", f"heatmaps/layer_diff_step_{i:03d}_layer_{l:02d}", img_shapes)
+
+            # 2. Step vs Step (Per Layer)
+            if prev_pred_x0 is not None: # Using prev_pred_x0 as a flag that we are past step 0, but we need prev_step_layer_outputs
+                if hasattr(self, 'prev_step_layer_outputs') and self.prev_step_layer_outputs is not None:
+                    for l in range(len(current_layer_outputs)):
+                        diff = torch.abs(current_layer_outputs[l] - self.prev_step_layer_outputs[l])
+                        plot_heatmap(diff, f"Step {i} vs {i-1} Layer {l}", f"heatmaps/step_diff_step_{i:03d}_layer_{l:02d}", img_shapes)
+            
+            self.prev_step_layer_outputs = current_layer_outputs
 
             if prev_pred_x0 is not None:
                 diff = torch.abs(pred_x0 - prev_pred_x0)

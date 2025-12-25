@@ -672,6 +672,7 @@ class QwenImageTransformer2DModel(nn.Module):
         attention_kwargs: dict[str, Any] | None = None,
         additional_t_cond=None,
         return_dict: bool = True,
+        return_intermediate: bool = False,
     ) -> torch.Tensor | Transformer2DModelOutput:
         """
         The [`QwenTransformer2DModel`] forward method.
@@ -692,6 +693,8 @@ class QwenImageTransformer2DModel(nn.Module):
             return_dict (`bool`, *optional*, defaults to `True`):
                 Whether or not to return a [`~models.transformer_2d.Transformer2DModelOutput`] instead of a plain
                 tuple.
+            return_intermediate (`bool`, *optional*, defaults to `False`):
+                Whether or not to return the intermediate hidden states of the transformer blocks.
 
         Returns:
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
@@ -746,6 +749,7 @@ class QwenImageTransformer2DModel(nn.Module):
             img_freqs = get_rotary_emb_chunk(img_freqs)
             image_rotary_emb = (img_freqs, txt_freqs)
 
+        intermediate_states = []
         for index_block, block in enumerate(self.transformer_blocks):
             encoder_hidden_states, hidden_states = block(
                 hidden_states=hidden_states,
@@ -756,6 +760,8 @@ class QwenImageTransformer2DModel(nn.Module):
                 joint_attention_kwargs=attention_kwargs,
                 modulate_index=modulate_index,
             )
+            if return_intermediate:
+                intermediate_states.append(hidden_states)
 
         if self.zero_cond_t:
             temb = temb.chunk(2, dim=0)[0]
@@ -765,6 +771,12 @@ class QwenImageTransformer2DModel(nn.Module):
 
         if self.parallel_config.sequence_parallel_size > 1:
             output = get_sp_group().all_gather(output, dim=-2)
+        
+        if not return_dict:
+            if return_intermediate:
+                return (output, intermediate_states)
+            return (output,)
+
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
