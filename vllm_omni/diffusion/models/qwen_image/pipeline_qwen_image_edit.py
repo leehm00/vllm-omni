@@ -666,6 +666,12 @@ class QwenImageEditPipeline(
                     # Flatten and compute cosine sim
                     sim = F.cosine_similarity(curr_out.flatten(), prev_out.flatten(), dim=0).item()
                     temporal_sim_matrix[layer_idx, i] = sim
+                    
+                    # Debug: Check for identical tensors
+                    if i < 3 and layer_idx == num_layers // 2:
+                         print(f"Step {i}, Layer {layer_idx} Temporal Sim: {sim:.6f}")
+                         if torch.equal(curr_out, prev_out):
+                             print(f"WARNING: Step {i}, Layer {layer_idx} output is IDENTICAL to previous step!")
                 else:
                     temporal_sim_matrix[layer_idx, i] = float('nan')
 
@@ -674,6 +680,12 @@ class QwenImageEditPipeline(
                     prev_layer_out = current_step_outputs[layer_idx - 1].float()
                     sim = F.cosine_similarity(curr_out.flatten(), prev_layer_out.flatten(), dim=0).item()
                     layer_sim_matrix[layer_idx, i] = sim
+                    
+                    # Debug: Check for identical tensors
+                    if i < 3 and layer_idx == num_layers // 2:
+                        print(f"Step {i}, Layer {layer_idx} Layer-wise Sim: {sim:.6f}")
+                        if torch.equal(curr_out, prev_layer_out):
+                             print(f"WARNING: Step {i}, Layer {layer_idx} output is IDENTICAL to previous layer!")
                 else:
                     # Layer 0 has no previous layer
                     layer_sim_matrix[layer_idx, i] = float('nan')
@@ -820,6 +832,20 @@ class QwenImageEditPipeline(
         plt.title('Layer-wise Cosine Similarity (Layer_i vs Layer_{i-1})')
         plt.savefig('heatmaps/layer_similarity.png')
         plt.close()
+
+        # Print Matrix Statistics
+        print(f"\nSimilarity Matrix Statistics:")
+        print(f"Temporal Sim Matrix: Min={np.nanmin(temporal_sim_matrix):.4f}, Max={np.nanmax(temporal_sim_matrix):.4f}, Mean={np.nanmean(temporal_sim_matrix):.4f}")
+        print(f"Layer Sim Matrix: Min={np.nanmin(layer_sim_matrix):.4f}, Max={np.nanmax(layer_sim_matrix):.4f}, Mean={np.nanmean(layer_sim_matrix):.4f}")
+        
+        # Check for static columns in Layer Sim (Vertical Stripes)
+        # Calculate variance across time for each layer
+        layer_time_var = np.nanvar(layer_sim_matrix, axis=1)
+        print(f"Layer Sim Variance across Time (Mean): {np.nanmean(layer_time_var):.6f}")
+        if np.nanmean(layer_time_var) < 1e-5:
+            print("WARNING: Layer similarity appears static across time steps (Vertical Stripes detected).")
+
+        if return_intermediate_latents:
 
         if return_intermediate_latents:
             return latents, intermediate_latents
