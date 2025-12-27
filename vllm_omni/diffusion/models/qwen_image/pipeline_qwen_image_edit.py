@@ -615,6 +615,8 @@ class QwenImageEditPipeline(
         num_steps = len(timesteps)
         temporal_sim_matrix = np.zeros((num_layers, num_steps))
         layer_sim_matrix = np.zeros((num_layers, num_steps))
+        temporal_l1_matrix = np.zeros((num_layers, num_steps))
+        layer_l1_matrix = np.zeros((num_layers, num_steps))
         
         prev_step_layer_outputs = None
 
@@ -669,23 +671,36 @@ class QwenImageEditPipeline(
             for layer_idx in range(num_layers):
                 curr_out = current_step_outputs[layer_idx].float() # Ensure float for precision
                 
+                if i == 0 and layer_idx == 0:
+                    print(f"Transformer Layer Output Shape: {curr_out.shape}")
+
                 # 1. Temporal Similarity (vs previous step)
                 if prev_step_layer_outputs is not None:
                     prev_out = prev_step_layer_outputs[layer_idx].float()
                     # Flatten and compute cosine sim
                     sim = F.cosine_similarity(curr_out.flatten(), prev_out.flatten(), dim=0).item()
                     temporal_sim_matrix[layer_idx, i] = sim
+                    
+                    # L1 Distance
+                    l1 = F.l1_loss(curr_out, prev_out).item()
+                    temporal_l1_matrix[layer_idx, i] = l1
                 else:
                     temporal_sim_matrix[layer_idx, i] = float('nan')
+                    temporal_l1_matrix[layer_idx, i] = float('nan')
 
                 # 2. Layer-wise Similarity (vs previous layer)
                 if layer_idx > 0:
                     prev_layer_out = current_step_outputs[layer_idx - 1].float()
                     sim = F.cosine_similarity(curr_out.flatten(), prev_layer_out.flatten(), dim=0).item()
                     layer_sim_matrix[layer_idx, i] = sim
+                    
+                    # L1 Distance
+                    l1 = F.l1_loss(curr_out, prev_layer_out).item()
+                    layer_l1_matrix[layer_idx, i] = l1
                 else:
                     # Layer 0 has no previous layer
                     layer_sim_matrix[layer_idx, i] = float('nan')
+                    layer_l1_matrix[layer_idx, i] = float('nan')
 
             if i % 10 == 0 and num_layers > 1:
                  print(f"Step {i}: Layer 1 vs Layer 0 Cosine Sim: {layer_sim_matrix[1, i]:.4f}")
@@ -813,6 +828,8 @@ class QwenImageEditPipeline(
         # Save raw data
         np.save('heatmaps/temporal_sim_matrix.npy', temporal_sim_matrix)
         np.save('heatmaps/layer_sim_matrix.npy', layer_sim_matrix)
+        np.save('heatmaps/temporal_l1_matrix.npy', temporal_l1_matrix)
+        np.save('heatmaps/layer_l1_matrix.npy', layer_l1_matrix)
         
         # Plot Temporal Similarity
         plt.figure(figsize=(12, 8))
@@ -835,6 +852,28 @@ class QwenImageEditPipeline(
         plt.ylabel('Transformer Layer')
         plt.title('Layer-wise Cosine Similarity (Layer_i vs Layer_{i-1})')
         plt.savefig('heatmaps/layer_similarity.png')
+        plt.close()
+
+        # Plot Temporal L1 Distance
+        plt.figure(figsize=(12, 8))
+        masked_temporal_l1 = np.ma.masked_invalid(temporal_l1_matrix)
+        plt.imshow(masked_temporal_l1, aspect='auto', cmap='viridis', interpolation='nearest', origin='lower')
+        plt.colorbar(label='L1 Distance')
+        plt.xlabel('Time Step')
+        plt.ylabel('Transformer Layer')
+        plt.title('Temporal L1 Distance (Layer_t vs Layer_{t-1})')
+        plt.savefig('heatmaps/temporal_l1.png')
+        plt.close()
+
+        # Plot Layer-wise L1 Distance
+        plt.figure(figsize=(12, 8))
+        masked_layer_l1 = np.ma.masked_invalid(layer_l1_matrix)
+        plt.imshow(masked_layer_l1, aspect='auto', cmap='viridis', interpolation='nearest', origin='lower')
+        plt.colorbar(label='L1 Distance')
+        plt.xlabel('Time Step')
+        plt.ylabel('Transformer Layer')
+        plt.title('Layer-wise L1 Distance (Layer_i vs Layer_{i-1})')
+        plt.savefig('heatmaps/layer_l1.png')
         plt.close()
 
         if return_intermediate_latents:
