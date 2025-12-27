@@ -740,7 +740,7 @@ class QwenImageEditPipeline(
                         # Threshold for the top-k values per batch
                         topk_vals = torch.topk(diff_map, topk, dim=1).values
                         thresh = topk_vals[:, -1].unsqueeze(1)
-                        frozen_mask = diff_map >= thresh
+                        frozen_mask = diff_map <= thresh
                         latents = torch.where(frozen_mask.unsqueeze(-1), image_latents, latents)
 
             if return_intermediate_latents:
