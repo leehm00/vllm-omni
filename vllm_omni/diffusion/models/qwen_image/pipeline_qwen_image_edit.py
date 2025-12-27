@@ -730,6 +730,18 @@ class QwenImageEditPipeline(
                     plt.savefig(f"heatmaps/hist_step_{i:03d}_batch_{b}.png")
                     plt.close()
 
+                # On the first step, replace the top 50% highest-difference positions with image_latents
+                if i == 0:
+                    # diff_map: (B, L). We select top 50% per batch.
+                    num_tokens = diff_map.shape[1]
+                    topk = num_tokens // 2
+                    if topk > 0:
+                        # Threshold for the top-k values per batch
+                        topk_vals = torch.topk(diff_map, topk, dim=1).values
+                        thresh = topk_vals[:, -1].unsqueeze(1)
+                        mask = diff_map >= thresh
+                        latents = torch.where(mask.unsqueeze(-1), image_latents, latents)
+
             if return_intermediate_latents:
                 intermediate_latents.append(pred_x0)
 
