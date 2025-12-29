@@ -595,7 +595,6 @@ class QwenImageEditPipeline(
         intermediate_latents = []
         self.scheduler.set_begin_index(0)
         prev_pred_x0 = None
-        frozen_mask = None  # tokens frozen to image_latents for all following steps
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -733,26 +732,12 @@ class QwenImageEditPipeline(
                     plt.savefig(os.path.join(heatmap_dir, f"hist_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
-                # On the first step, replace the top 50% highest-difference positions with image_latents
-                if i == 0:
-                    # diff_map: (B, L). We select top 50% per batch.
-                    num_tokens = diff_map.shape[1]
-                    topk = num_tokens // 2
-                    if topk > 0:
-                        # Threshold for the top-k values per batch
-                        topk_vals = torch.topk(diff_map, topk, dim=1).values
-                        thresh = topk_vals[:, -1].unsqueeze(1)
-                        frozen_mask = diff_map <= thresh
-                        latents = torch.where(frozen_mask.unsqueeze(-1), image_latents, latents)
 
             if return_intermediate_latents:
                 intermediate_latents.append(pred_x0)
 
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-            # Keep frozen tokens aligned with image_latents across subsequent steps
-            if frozen_mask is not None and image_latents is not None:
-                latents = torch.where(frozen_mask.unsqueeze(-1), image_latents, latents)
 
         if return_intermediate_latents:
             return latents, intermediate_latents
