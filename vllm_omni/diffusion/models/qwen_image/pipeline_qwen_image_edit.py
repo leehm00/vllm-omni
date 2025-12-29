@@ -667,12 +667,12 @@ class QwenImageEditPipeline(
                 diff_L0 = torch.norm(current_step_outputs[0].float() - prev_step_layer_outputs[0].float()).item()
                 print(f"Step {i}: t={t.item():.2f}, Layer 0 Output Diff Norm vs Prev Step: {diff_L0:.4f}")
             
-            # Calculate Similarities
+            # Calculate Similarities and L1 Distances
             for layer_idx in range(num_layers):
                 curr_out = current_step_outputs[layer_idx].float() # Ensure float for precision
                 
                 if i == 0 and layer_idx == 0:
-                    print(f"Transformer Layer Output Shape: {curr_out.shape}")
+                    print(f"Transformer Layer Output Tensor Shape: {curr_out.shape}")
 
                 # 1. Temporal Similarity (vs previous step)
                 if prev_step_layer_outputs is not None:
@@ -680,9 +680,8 @@ class QwenImageEditPipeline(
                     # Flatten and compute cosine sim
                     sim = F.cosine_similarity(curr_out.flatten(), prev_out.flatten(), dim=0).item()
                     temporal_sim_matrix[layer_idx, i] = sim
-                    
-                    # L1 Distance
-                    l1 = F.l1_loss(curr_out, prev_out).item()
+                    # L1 Distance (Mean Absolute Error)
+                    l1 = (curr_out - prev_out).abs().mean().item()
                     temporal_l1_matrix[layer_idx, i] = l1
                 else:
                     temporal_sim_matrix[layer_idx, i] = float('nan')
@@ -693,9 +692,8 @@ class QwenImageEditPipeline(
                     prev_layer_out = current_step_outputs[layer_idx - 1].float()
                     sim = F.cosine_similarity(curr_out.flatten(), prev_layer_out.flatten(), dim=0).item()
                     layer_sim_matrix[layer_idx, i] = sim
-                    
-                    # L1 Distance
-                    l1 = F.l1_loss(curr_out, prev_layer_out).item()
+                    # L1 Distance (Mean Absolute Error)
+                    l1 = (curr_out - prev_layer_out).abs().mean().item()
                     layer_l1_matrix[layer_idx, i] = l1
                 else:
                     # Layer 0 has no previous layer
@@ -831,50 +829,40 @@ class QwenImageEditPipeline(
         np.save('heatmaps/temporal_l1_matrix.npy', temporal_l1_matrix)
         np.save('heatmaps/layer_l1_matrix.npy', layer_l1_matrix)
         
-        # Plot Temporal Similarity
-        plt.figure(figsize=(12, 8))
-        # Mask NaNs
-        masked_temporal = np.ma.masked_invalid(temporal_sim_matrix)
-        plt.imshow(masked_temporal, aspect='auto', cmap='YlGnBu', interpolation='nearest', origin='lower')
-        plt.colorbar(label='Cosine Similarity')
-        plt.xlabel('Time Step')
-        plt.ylabel('Transformer Layer')
-        plt.title('Temporal Cosine Similarity (Layer_t vs Layer_{t-1})')
-        plt.savefig('heatmaps/temporal_similarity.png')
-        plt.close()
-        
-        # Plot Layer-wise Similarity
-        plt.figure(figsize=(12, 8))
-        masked_layer = np.ma.masked_invalid(layer_sim_matrix)
-        plt.imshow(masked_layer, aspect='auto', cmap='YlGnBu', interpolation='nearest', origin='lower')
-        plt.colorbar(label='Cosine Similarity')
-        plt.xlabel('Time Step')
-        plt.ylabel('Transformer Layer')
-        plt.title('Layer-wise Cosine Similarity (Layer_i vs Layer_{i-1})')
-        plt.savefig('heatmaps/layer_similarity.png')
-        plt.close()
+        def plot_heatmap(matrix, title, filename, label):
+            plt.figure(figsize=(12, 8))
+            masked_matrix = np.ma.masked_invalid(matrix)
+            plt.imshow(masked_matrix, aspect='auto', cmap='YlGnBu', interpolation='nearest', origin='lower')
+            plt.colorbar(label=label)
+            plt.xlabel('Time Step')
+            plt.ylabel('Transformer Layer')
+            plt.title(title)
+            plt.savefig(filename)
+            plt.close()
 
-        # Plot Temporal L1 Distance
-        plt.figure(figsize=(12, 8))
-        masked_temporal_l1 = np.ma.masked_invalid(temporal_l1_matrix)
-        plt.imshow(masked_temporal_l1, aspect='auto', cmap='viridis', interpolation='nearest', origin='lower')
-        plt.colorbar(label='L1 Distance')
-        plt.xlabel('Time Step')
-        plt.ylabel('Transformer Layer')
-        plt.title('Temporal L1 Distance (Layer_t vs Layer_{t-1})')
-        plt.savefig('heatmaps/temporal_l1.png')
-        plt.close()
+        def plot_histogram(matrix, title, filename, label):
+            plt.figure(figsize=(10, 6))
+            # Flatten and remove NaNs
+            data = matrix.flatten()
+            data = data[~np.isnan(data)]
+            plt.hist(data, bins=50, color='skyblue', edgecolor='black')
+            plt.xlabel(label)
+            plt.ylabel('Frequency')
+            plt.title(title)
+            plt.savefig(filename)
+            plt.close()
 
-        # Plot Layer-wise L1 Distance
-        plt.figure(figsize=(12, 8))
-        masked_layer_l1 = np.ma.masked_invalid(layer_l1_matrix)
-        plt.imshow(masked_layer_l1, aspect='auto', cmap='viridis', interpolation='nearest', origin='lower')
-        plt.colorbar(label='L1 Distance')
-        plt.xlabel('Time Step')
-        plt.ylabel('Transformer Layer')
-        plt.title('Layer-wise L1 Distance (Layer_i vs Layer_{i-1})')
-        plt.savefig('heatmaps/layer_l1.png')
-        plt.close()
+        # Plot Cosine Similarity
+        plot_heatmap(temporal_sim_matrix, 'Temporal Cosine Similarity (Layer_t vs Layer_{t-1})', 'heatmaps/temporal_similarity.png', 'Cosine Similarity')
+        plot_heatmap(layer_sim_matrix, 'Layer-wise Cosine Similarity (Layer_i vs Layer_{i-1})', 'heatmaps/layer_similarity.png', 'Cosine Similarity')
+
+        # Plot L1 Distance
+        plot_heatmap(temporal_l1_matrix, 'Temporal L1 Distance (Layer_t vs Layer_{t-1})', 'heatmaps/temporal_l1_distance.png', 'Mean L1 Distance')
+        plot_heatmap(layer_l1_matrix, 'Layer-wise L1 Distance (Layer_i vs Layer_{i-1})', 'heatmaps/layer_l1_distance.png', 'Mean L1 Distance')
+
+        # Plot Histograms
+        plot_histogram(temporal_l1_matrix, 'Distribution of Temporal L1 Distances', 'heatmaps/temporal_l1_hist.png', 'Mean L1 Distance')
+        plot_histogram(layer_l1_matrix, 'Distribution of Layer-wise L1 Distances', 'heatmaps/layer_l1_hist.png', 'Mean L1 Distance')
 
         if return_intermediate_latents:
             return latents, intermediate_latents
