@@ -249,6 +249,11 @@ def main():
     print(f"  Parallel configuration: ulysses_degree={args.ulysses_degree}")
     print(f"{'=' * 60}\n")
 
+    # Configure heatmap directory based on output name for downstream pipeline
+    output_path = Path(args.output)
+    heatmap_dir = output_path.parent / f"{output_path.stem}_heatmaps"
+    os.environ["HEATMAP_DIR"] = str(heatmap_dir)
+
     generation_start = time.perf_counter()
     # Generate edited image
     output_obj = omni.generate(
@@ -271,7 +276,6 @@ def main():
     print(f"Total generation time: {generation_time:.4f} seconds ({generation_time * 1000:.2f} ms)")
 
     # Save output image(s)
-    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     suffix = output_path.suffix or ".png"
     stem = output_path.stem or "output_image_edit"

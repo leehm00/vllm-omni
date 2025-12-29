@@ -243,6 +243,8 @@ class QwenImageEditPipeline(
         self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"  # noqa: E501
         self.prompt_template_encode_start_idx = 64
         self.default_sample_size = 128
+        # Heatmap output directory (can be overridden via env set by caller)
+        self.heatmap_dir = os.environ.get("HEATMAP_DIR", "heatmaps")
 
     def check_inputs(
         self,
@@ -672,7 +674,7 @@ class QwenImageEditPipeline(
                 diff_step_map = diff.sum(dim=-1)
                 
                 import matplotlib.pyplot as plt
-                os.makedirs("heatmaps", exist_ok=True)
+                os.makedirs(self.heatmap_dir, exist_ok=True)
 
                 for b in range(diff_step_map.shape[0]):
                     grid_h = img_shapes[b][0][1]
@@ -683,7 +685,7 @@ class QwenImageEditPipeline(
                     plt.imshow(heatmap_step, cmap='viridis')
                     plt.colorbar()
                     plt.title(f"Step {i} |pred_x0_t - pred_x0_t-1|")
-                    plt.savefig(f"heatmaps/diff_step_delta_{i:03d}_batch_{b}.png")
+                    plt.savefig(os.path.join(self.heatmap_dir, f"diff_step_delta_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                     # Plot histogram for step difference
@@ -692,7 +694,7 @@ class QwenImageEditPipeline(
                     plt.title(f"Step {i} Histogram of |pred_x0_t - pred_x0_t-1|")
                     plt.xlabel("Difference Value")
                     plt.ylabel("Frequency")
-                    plt.savefig(f"heatmaps/hist_step_delta_{i:03d}_batch_{b}.png")
+                    plt.savefig(os.path.join(self.heatmap_dir, f"hist_step_delta_{i:03d}_batch_{b}.png"))
                     plt.close()
 
             prev_pred_x0 = pred_x0
@@ -704,7 +706,7 @@ class QwenImageEditPipeline(
                 diff_map = diff_abs.sum(dim=-1)
 
                 import matplotlib.pyplot as plt
-                os.makedirs("heatmaps", exist_ok=True)
+                os.makedirs(self.heatmap_dir, exist_ok=True)
 
                 for b in range(diff_map.shape[0]):
                     # Retrieve grid dimensions from img_shapes
@@ -719,7 +721,7 @@ class QwenImageEditPipeline(
                     plt.imshow(heatmap, cmap='viridis')
                     plt.colorbar()
                     plt.title(f"Step {i} |pred_x0 - image_latents|")
-                    plt.savefig(f"heatmaps/diff_step_{i:03d}_batch_{b}.png")
+                    plt.savefig(os.path.join(self.heatmap_dir, f"diff_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                     # Plot histogram
@@ -728,7 +730,7 @@ class QwenImageEditPipeline(
                     plt.title(f"Step {i} Histogram of |pred_x0 - image_latents|")
                     plt.xlabel("Difference Value")
                     plt.ylabel("Frequency")
-                    plt.savefig(f"heatmaps/hist_step_{i:03d}_batch_{b}.png")
+                    plt.savefig(os.path.join(self.heatmap_dir, f"hist_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                 # On the first step, replace the top 50% highest-difference positions with image_latents
