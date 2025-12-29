@@ -737,7 +737,7 @@ class QwenImageEditPipeline(
                 if i == 0:
                     # diff_map: (B, L). We select top 50% per batch.
                     num_tokens = diff_map.shape[1]
-                    topk = num_tokens // 2
+                    topk = num_tokens // 10
                     if topk > 0:
                         # Threshold for the top-k values per batch
                         topk_vals = torch.topk(diff_map, topk, dim=1).values
