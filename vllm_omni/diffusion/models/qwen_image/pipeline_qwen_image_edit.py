@@ -590,14 +590,13 @@ class QwenImageEditPipeline(
         guidance,
         true_cfg_scale,
         return_intermediate_latents=False,
-        heatmap_dir: str | None = None,
     ):
         """Diffusion loop with optional image conditioning."""
         intermediate_latents = []
         self.scheduler.set_begin_index(0)
         prev_pred_x0 = None
         frozen_mask = None  # tokens frozen to image_latents for all following steps
-        heatmap_dir = heatmap_dir or "heatmaps"
+        heatmap_dir = getattr(self, "_heatmap_dir", "heatmaps")
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -742,7 +741,7 @@ class QwenImageEditPipeline(
                         # Threshold for the top-k values per batch
                         topk_vals = torch.topk(diff_map, topk, dim=1).values
                         thresh = topk_vals[:, -1].unsqueeze(1)
-                        frozen_mask = diff_map <= thresh
+                        frozen_mask = diff_map >= thresh
                         latents = torch.where(frozen_mask.unsqueeze(-1), image_latents, latents)
 
             if return_intermediate_latents:
@@ -798,6 +797,16 @@ class QwenImageEditPipeline(
         max_sequence_length: int = 512,
     ) -> DiffusionOutput:
         """Forward pass for image editing."""
+        # Derive heatmap directory from request/output info; default to local "heatmaps".
+        heatmap_dir = None
+        if getattr(req, "extra", None):
+            heatmap_dir = req.extra.get("heatmap_dir")
+        if heatmap_dir is None:
+            base_dir = getattr(req, "output_path", None) or "heatmaps"
+            fname = getattr(req, "output_file_name", None) or "heatmaps"
+            heatmap_dir = os.path.join(base_dir, f"{fname}_heatmaps")
+        self._heatmap_dir = heatmap_dir
+
         prompt = req.prompt if req.prompt is not None else prompt
         negative_prompt = req.negative_prompt if req.negative_prompt is not None else negative_prompt
 
@@ -857,18 +866,6 @@ class QwenImageEditPipeline(
         self._attention_kwargs = attention_kwargs
         self._current_timestep = None
         self._interrupt = False
-        # Resolve heatmap directory from request/output naming to avoid env-dependent paths
-        heatmap_dir = None
-        if getattr(req, "output_path", None):
-            base_dir = req.output_path
-            file_stem = getattr(req, "output_file_name", None)
-            if file_stem:
-                heatmap_dir = os.path.join(base_dir, file_stem)
-            else:
-                heatmap_dir = base_dir
-        else:
-            # Fallback
-            heatmap_dir = "heatmaps"
 
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
@@ -956,7 +953,6 @@ class QwenImageEditPipeline(
             guidance,
             true_cfg_scale,
             return_intermediate_latents=return_intermediate_latents,
-            heatmap_dir=heatmap_dir,
         )
 
         if return_intermediate_latents:
