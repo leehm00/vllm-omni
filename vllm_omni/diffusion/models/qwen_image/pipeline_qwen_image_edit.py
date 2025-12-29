@@ -596,7 +596,6 @@ class QwenImageEditPipeline(
         self.scheduler.set_begin_index(0)
         prev_pred_x0 = None
         frozen_mask = None  # tokens frozen to image_latents for all following steps
-        heatmap_dir = getattr(self, "_heatmap_dir", "heatmaps")
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -673,6 +672,7 @@ class QwenImageEditPipeline(
                 diff_step_map = diff.sum(dim=-1)
                 
                 import matplotlib.pyplot as plt
+                heatmap_dir = getattr(self, "_heatmap_dir", "heatmaps")
                 os.makedirs(heatmap_dir, exist_ok=True)
 
                 for b in range(diff_step_map.shape[0]):
@@ -705,6 +705,7 @@ class QwenImageEditPipeline(
                 diff_map = diff_abs.sum(dim=-1)
 
                 import matplotlib.pyplot as plt
+                heatmap_dir = getattr(self, "_heatmap_dir", "heatmaps")
                 os.makedirs(heatmap_dir, exist_ok=True)
 
                 for b in range(diff_map.shape[0]):
@@ -741,7 +742,7 @@ class QwenImageEditPipeline(
                         # Threshold for the top-k values per batch
                         topk_vals = torch.topk(diff_map, topk, dim=1).values
                         thresh = topk_vals[:, -1].unsqueeze(1)
-                        frozen_mask = diff_map >= thresh
+                        frozen_mask = diff_map <= thresh
                         latents = torch.where(frozen_mask.unsqueeze(-1), image_latents, latents)
 
             if return_intermediate_latents:
@@ -797,18 +798,15 @@ class QwenImageEditPipeline(
         max_sequence_length: int = 512,
     ) -> DiffusionOutput:
         """Forward pass for image editing."""
-        # Derive heatmap directory from request/output info; default to local "heatmaps".
-        heatmap_dir = None
-        if getattr(req, "extra", None):
-            heatmap_dir = req.extra.get("heatmap_dir")
-        if heatmap_dir is None:
-            base_dir = getattr(req, "output_path", None) or "heatmaps"
-            fname = getattr(req, "output_file_name", None) or "heatmaps"
-            heatmap_dir = os.path.join(base_dir, f"{fname}_heatmaps")
-        self._heatmap_dir = heatmap_dir
-
         prompt = req.prompt if req.prompt is not None else prompt
         negative_prompt = req.negative_prompt if req.negative_prompt is not None else negative_prompt
+
+        # Prepare heatmap directory based on requested output name to avoid relying on env vars
+        out_dir = req.output_path or "outputs"
+        out_name = req.output_file_name or "output"
+        heatmap_dir = os.path.join(out_dir, f"{out_name}_heatmaps")
+        os.makedirs(heatmap_dir, exist_ok=True)
+        self._heatmap_dir = heatmap_dir
 
         # Get preprocessed image from request (pre-processing is done in DiffusionEngine)
         if hasattr(req, "preprocessed_image"):

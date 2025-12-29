@@ -171,6 +171,12 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
 
+    # Derive output directory/name/ext for downstream logging (heatmaps, etc.)
+    output_path = Path(args.output)
+    output_dir = output_path.parent if output_path.parent != Path("") else Path(".")
+    output_stem = output_path.stem or "output_image_edit"
+    output_ext = output_path.suffix or ".png"
+
     # Validate input images exist and load them
     input_images = []
     for image_path in args.image:
@@ -250,13 +256,6 @@ def main():
     print(f"{'=' * 60}\n")
 
     generation_start = time.perf_counter()
-    # Heatmap folder derived from output file name (no env vars; works multi-GPU)
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = output_path.suffix or ".png"
-    stem = output_path.stem or "output_image_edit"
-    heatmap_dir = output_path.parent / f"{stem}_heatmaps"
-
     # Generate edited image
     output_obj = omni.generate(
         prompt=args.prompt,
@@ -269,10 +268,9 @@ def main():
         num_outputs_per_prompt=args.num_outputs_per_prompt,
         layers=args.layers,
         return_trajectory_decoded=args.save_every_step,
-        output_path=str(output_path.parent),
-        output_file_name=stem,
-        output_file_ext=suffix,
-        extra={"heatmap_dir": str(heatmap_dir)},
+        output_path=str(output_dir),
+        output_file_name=output_stem,
+        output_file_ext=output_ext,
     )
     images = output_obj.output
     generation_end = time.perf_counter()
@@ -282,6 +280,11 @@ def main():
     print(f"Total generation time: {generation_time:.4f} seconds ({generation_time * 1000:.2f} ms)")
 
     # Save output image(s)
+    output_path = output_dir / (output_stem + output_ext)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = output_ext
+    stem = output_stem
+
     if args.num_outputs_per_prompt <= 1:
         img = images[0]
         img = img if isinstance(img, list) else [img]
