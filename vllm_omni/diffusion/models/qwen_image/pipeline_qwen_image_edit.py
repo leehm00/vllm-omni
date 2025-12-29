@@ -243,8 +243,6 @@ class QwenImageEditPipeline(
         self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"  # noqa: E501
         self.prompt_template_encode_start_idx = 64
         self.default_sample_size = 128
-        # Heatmap output directory (can be overridden via env set by caller)
-        self.heatmap_dir = os.environ.get("HEATMAP_DIR", "heatmaps")
 
     def check_inputs(
         self,
@@ -592,12 +590,14 @@ class QwenImageEditPipeline(
         guidance,
         true_cfg_scale,
         return_intermediate_latents=False,
+        heatmap_dir: str | None = None,
     ):
         """Diffusion loop with optional image conditioning."""
         intermediate_latents = []
         self.scheduler.set_begin_index(0)
         prev_pred_x0 = None
         frozen_mask = None  # tokens frozen to image_latents for all following steps
+        heatmap_dir = heatmap_dir or "heatmaps"
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -674,7 +674,7 @@ class QwenImageEditPipeline(
                 diff_step_map = diff.sum(dim=-1)
                 
                 import matplotlib.pyplot as plt
-                os.makedirs(self.heatmap_dir, exist_ok=True)
+                os.makedirs(heatmap_dir, exist_ok=True)
 
                 for b in range(diff_step_map.shape[0]):
                     grid_h = img_shapes[b][0][1]
@@ -685,7 +685,7 @@ class QwenImageEditPipeline(
                     plt.imshow(heatmap_step, cmap='viridis')
                     plt.colorbar()
                     plt.title(f"Step {i} |pred_x0_t - pred_x0_t-1|")
-                    plt.savefig(os.path.join(self.heatmap_dir, f"diff_step_delta_{i:03d}_batch_{b}.png"))
+                    plt.savefig(os.path.join(heatmap_dir, f"diff_step_delta_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                     # Plot histogram for step difference
@@ -694,7 +694,7 @@ class QwenImageEditPipeline(
                     plt.title(f"Step {i} Histogram of |pred_x0_t - pred_x0_t-1|")
                     plt.xlabel("Difference Value")
                     plt.ylabel("Frequency")
-                    plt.savefig(os.path.join(self.heatmap_dir, f"hist_step_delta_{i:03d}_batch_{b}.png"))
+                    plt.savefig(os.path.join(heatmap_dir, f"hist_step_delta_{i:03d}_batch_{b}.png"))
                     plt.close()
 
             prev_pred_x0 = pred_x0
@@ -706,7 +706,7 @@ class QwenImageEditPipeline(
                 diff_map = diff_abs.sum(dim=-1)
 
                 import matplotlib.pyplot as plt
-                os.makedirs(self.heatmap_dir, exist_ok=True)
+                os.makedirs(heatmap_dir, exist_ok=True)
 
                 for b in range(diff_map.shape[0]):
                     # Retrieve grid dimensions from img_shapes
@@ -721,7 +721,7 @@ class QwenImageEditPipeline(
                     plt.imshow(heatmap, cmap='viridis')
                     plt.colorbar()
                     plt.title(f"Step {i} |pred_x0 - image_latents|")
-                    plt.savefig(os.path.join(self.heatmap_dir, f"diff_step_{i:03d}_batch_{b}.png"))
+                    plt.savefig(os.path.join(heatmap_dir, f"diff_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                     # Plot histogram
@@ -730,7 +730,7 @@ class QwenImageEditPipeline(
                     plt.title(f"Step {i} Histogram of |pred_x0 - image_latents|")
                     plt.xlabel("Difference Value")
                     plt.ylabel("Frequency")
-                    plt.savefig(os.path.join(self.heatmap_dir, f"hist_step_{i:03d}_batch_{b}.png"))
+                    plt.savefig(os.path.join(heatmap_dir, f"hist_step_{i:03d}_batch_{b}.png"))
                     plt.close()
 
                 # On the first step, replace the top 50% highest-difference positions with image_latents
@@ -857,6 +857,18 @@ class QwenImageEditPipeline(
         self._attention_kwargs = attention_kwargs
         self._current_timestep = None
         self._interrupt = False
+        # Resolve heatmap directory from request/output naming to avoid env-dependent paths
+        heatmap_dir = None
+        if getattr(req, "output_path", None):
+            base_dir = req.output_path
+            file_stem = getattr(req, "output_file_name", None)
+            if file_stem:
+                heatmap_dir = os.path.join(base_dir, file_stem)
+            else:
+                heatmap_dir = base_dir
+        else:
+            # Fallback
+            heatmap_dir = "heatmaps"
 
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
@@ -944,6 +956,7 @@ class QwenImageEditPipeline(
             guidance,
             true_cfg_scale,
             return_intermediate_latents=return_intermediate_latents,
+            heatmap_dir=heatmap_dir,
         )
 
         if return_intermediate_latents:
