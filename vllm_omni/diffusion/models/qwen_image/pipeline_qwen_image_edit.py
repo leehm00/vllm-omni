@@ -610,17 +610,20 @@ class QwenImageEditPipeline(
 
             if i == 0:
                 print(f"\n--- Transformer Input Token Analysis ---")
-                print(f"Total Input Tokens (Sequence Length): {latent_model_input.shape[1]}")
-                print(f"Token Dimension: {latent_model_input.shape[2]}")
-                
-                num_edited_tokens = latents.shape[1]
-                print(f"Edited Image Tokens: {num_edited_tokens} (Indices 0 to {num_edited_tokens-1})")
-                
+                # Image Tokens
+                num_image_tokens = latent_model_input.shape[1]
+                print(f"Image Tokens (Latents): {num_image_tokens}")
+                print(f"  - Edited Image Tokens: {latents.shape[1]}")
                 if image_latents is not None:
-                    num_original_tokens = image_latents.shape[1]
-                    print(f"Original Image Tokens: {num_original_tokens} (Indices {num_edited_tokens} to {num_edited_tokens + num_original_tokens - 1})")
-                else:
-                    print("Original Image Tokens: 0")
+                    print(f"  - Original Image Tokens (Condition): {image_latents.shape[1]}")
+                
+                # Text Tokens
+                num_text_tokens = prompt_embeds.shape[1] if prompt_embeds is not None else 0
+                print(f"Text Tokens (Prompt): {num_text_tokens}")
+
+                # Total
+                print(f"Total Tokens in Attention (Image + Text): {num_image_tokens + num_text_tokens}")
+                print(f"Token Dimension: {latent_model_input.shape[2]}")
                 print("----------------------------------------\n")
 
             # Forward pass for positive prompt (or unconditional if no CFG)
