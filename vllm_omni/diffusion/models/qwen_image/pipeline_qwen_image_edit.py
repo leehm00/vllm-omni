@@ -608,6 +608,21 @@ class QwenImageEditPipeline(
             if image_latents is not None:
                 latent_model_input = torch.cat([latents, image_latents], dim=1)
 
+            if i == 0:
+                print(f"\n--- Transformer Input Token Analysis ---")
+                print(f"Total Input Tokens (Sequence Length): {latent_model_input.shape[1]}")
+                print(f"Token Dimension: {latent_model_input.shape[2]}")
+                
+                num_edited_tokens = latents.shape[1]
+                print(f"Edited Image Tokens: {num_edited_tokens} (Indices 0 to {num_edited_tokens-1})")
+                
+                if image_latents is not None:
+                    num_original_tokens = image_latents.shape[1]
+                    print(f"Original Image Tokens: {num_original_tokens} (Indices {num_edited_tokens} to {num_edited_tokens + num_original_tokens - 1})")
+                else:
+                    print("Original Image Tokens: 0")
+                print("----------------------------------------\n")
+
             # Forward pass for positive prompt (or unconditional if no CFG)
             # cache_branch is passed to hook for CFG-aware state management
             transformer_kwargs = {
