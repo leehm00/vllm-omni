@@ -361,7 +361,29 @@ class QwenImageCrossAttention(nn.Module):
         encoder_hidden_states: torch.Tensor,
         vid_freqs: torch.Tensor,
         txt_freqs: torch.Tensor,
+        frozen_mask: torch.Tensor | None = None,
+        extract_kv: bool = False,
+        original_img_key: torch.Tensor | None = None,
+        original_img_value: torch.Tensor | None = None,
     ):
+        """
+        Forward pass for cross attention.
+        
+        Args:
+            hidden_states: Image hidden states (B, img_seq_len, dim). When editing, this may be
+                concat([edited_latents, original_latents]) with shape (B, 2*L, dim).
+            encoder_hidden_states: Text hidden states (B, txt_seq_len, dim)
+            vid_freqs: Video/image rotary frequencies
+            txt_freqs: Text rotary frequencies
+            frozen_mask: Boolean mask (B, original_seq_len) indicating frozen positions.
+                This mask applies to the FIRST original_seq_len positions of hidden_states.
+            extract_kv: If True, extract and return KV tensors for use in subsequent steps
+            original_img_key: Original image key tensor (B, original_seq_len, num_heads, head_dim) for KV replacement
+            original_img_value: Original image value tensor (B, original_seq_len, num_heads, head_dim) for KV replacement
+            
+        Returns:
+            img_attn_output, txt_attn_output, and optionally extracted_kv_info dict
+        """
         seq_len_txt = encoder_hidden_states.shape[1]
 
         # Compute QKV for image stream (sample projections)
@@ -397,6 +419,48 @@ class QwenImageCrossAttention(nn.Module):
         txt_query = self.rope(txt_query, txt_cos, txt_sin)
         txt_key = self.rope(txt_key, txt_cos, txt_sin)
 
+        # Replace KV for frozen positions with original image KV
+        # Note: frozen_mask shape is (B, original_img_seq_len) which corresponds to the first part of hidden_states
+        # when hidden_states = concat([edited_latents, original_latents])
+        # original_img_key/value shape is (B, original_img_seq_len, num_heads, head_dim)
+        if frozen_mask is not None and original_img_key is not None and original_img_value is not None:
+            # Get the sequence length from frozen_mask (original image seq len)
+            original_seq_len = frozen_mask.shape[1]
+            current_img_seq_len = img_key.shape[1]
+            
+            if original_seq_len <= current_img_seq_len:
+                # frozen_mask applies to the first `original_seq_len` positions of img_key/img_value
+                # Expand mask to match KV shape: (B, original_seq_len, num_heads, head_dim)
+                frozen_mask_expanded = frozen_mask.unsqueeze(-1).unsqueeze(-1).expand(
+                    -1, -1, img_key.shape[2], img_key.shape[3]
+                )
+                # Only replace KV for the first `original_seq_len` positions
+                img_key_front = img_key[:, :original_seq_len]
+                img_value_front = img_value[:, :original_seq_len]
+                
+                img_key_front = torch.where(frozen_mask_expanded, original_img_key, img_key_front)
+                img_value_front = torch.where(frozen_mask_expanded, original_img_value, img_value_front)
+                
+                # Reconstruct img_key and img_value
+                if current_img_seq_len > original_seq_len:
+                    img_key = torch.cat([img_key_front, img_key[:, original_seq_len:]], dim=1)
+                    img_value = torch.cat([img_value_front, img_value[:, original_seq_len:]], dim=1)
+                else:
+                    img_key = img_key_front
+                    img_value = img_value_front
+
+        # Extract full KV tensors if requested (for use in subsequent steps)
+        extracted_kv_info = None
+        if extract_kv:
+            # Extract the full img_key and img_value tensors after RoPE application
+            # These will be used to replace KV at frozen positions in subsequent steps
+            extracted_kv_info = {
+                'img_key': img_key.clone(),  # (B, img_seq_len, num_heads, head_dim)
+                'img_value': img_value.clone(),  # (B, img_seq_len, num_heads, head_dim)
+                'text_seq_len': seq_len_txt,
+                'img_seq_len': img_key.shape[1],
+            }
+
         # Concatenate for joint attention
         # Order: [text, image]
         joint_query = torch.cat([txt_query, img_query], dim=1)
@@ -423,6 +487,8 @@ class QwenImageCrossAttention(nn.Module):
 
         txt_attn_output, _ = self.to_add_out(txt_attn_output)
 
+        if extract_kv:
+            return img_attn_output, txt_attn_output, extracted_kv_info
         return img_attn_output, txt_attn_output
 
 
@@ -515,7 +581,31 @@ class QwenImageTransformerBlock(nn.Module):
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor],
         joint_attention_kwargs: dict[str, Any] | None = None,
         modulate_index: list[int] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        frozen_mask: torch.Tensor | None = None,
+        extract_kv: bool = False,
+        original_kv: dict | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        Forward pass for transformer block.
+        
+        Args:
+            hidden_states: Image hidden states (B, img_seq_len, dim). When editing, this may be
+                concat([edited_latents, original_latents]) with shape (B, 2*L, dim).
+            encoder_hidden_states: Text hidden states
+            encoder_hidden_states_mask: Text attention mask
+            temb: Timestep embedding
+            image_rotary_emb: Rotary embeddings for image and text
+            joint_attention_kwargs: Additional attention kwargs
+            modulate_index: Index for modulation
+            frozen_mask: Boolean mask (B, original_seq_len) indicating frozen positions.
+                This mask applies to the FIRST original_seq_len positions of hidden_states.
+            extract_kv: If True, extract and return KV from this layer
+            original_kv: Dict with 'img_key' and 'img_value' tensors (B, original_seq_len, num_heads, head_dim)
+                for KV replacement at frozen positions.
+            
+        Returns:
+            encoder_hidden_states, hidden_states, and optionally extracted_kv_info
+        """
         # Get modulation parameters for both streams
         img_mod_params = self.img_mod(temb)  # [B, 6*dim]
 
@@ -542,15 +632,28 @@ class QwenImageTransformerBlock(nn.Module):
         # 2. Applies QK normalization and RoPE
         # 3. Concatenates and runs joint attention
         # 4. Splits results back to separate streams
+        
+        # Get original KV if provided
+        original_img_key = original_kv.get('img_key') if original_kv else None
+        original_img_value = original_kv.get('img_value') if original_kv else None
+        
         attn_output = self.attn(
             hidden_states=img_modulated,  # Image stream (will be processed as "sample")
             encoder_hidden_states=txt_modulated,  # Text stream (will be processed as "context")
             vid_freqs=image_rotary_emb[0],
             txt_freqs=image_rotary_emb[1],
+            frozen_mask=frozen_mask,
+            extract_kv=extract_kv,
+            original_img_key=original_img_key,
+            original_img_value=original_img_value,
         )
 
-        # QwenAttnProcessor2_0 returns (img_output, txt_output) when encoder_hidden_states is provided
-        img_attn_output, txt_attn_output = attn_output
+        # Handle return based on whether KV extraction was requested
+        if extract_kv:
+            img_attn_output, txt_attn_output, extracted_kv_info = attn_output
+        else:
+            img_attn_output, txt_attn_output = attn_output
+            extracted_kv_info = None
 
         # Apply attention gates and add residual (like in Megatron)
         hidden_states = hidden_states + img_gate1 * img_attn_output
@@ -574,6 +677,8 @@ class QwenImageTransformerBlock(nn.Module):
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
 
+        if extract_kv:
+            return encoder_hidden_states, hidden_states, extracted_kv_info
         return encoder_hidden_states, hidden_states
 
 
@@ -673,6 +778,9 @@ class QwenImageTransformer2DModel(nn.Module):
         additional_t_cond=None,
         return_dict: bool = True,
         return_intermediate: bool = False,
+        frozen_mask: torch.Tensor | None = None,
+        extract_kv: bool = False,
+        original_kv_cache: list[dict] | None = None,
     ) -> torch.Tensor | Transformer2DModelOutput:
         """
         The [`QwenTransformer2DModel`] forward method.
@@ -695,6 +803,12 @@ class QwenImageTransformer2DModel(nn.Module):
                 tuple.
             return_intermediate (`bool`, *optional*, defaults to `False`):
                 Whether or not to return the intermediate hidden states of the transformer blocks.
+            frozen_mask (`torch.Tensor`, *optional*):
+                Boolean mask (B, img_seq_len) indicating frozen positions for KV replacement.
+            extract_kv (`bool`, *optional*, defaults to `False`):
+                Whether to extract and return KV tensors from each layer.
+            original_kv_cache (`list[dict]`, *optional*):
+                List of dicts with 'img_key' and 'img_value' tensors for each layer, used for KV replacement.
 
         Returns:
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
@@ -750,8 +864,14 @@ class QwenImageTransformer2DModel(nn.Module):
             image_rotary_emb = (img_freqs, txt_freqs)
 
         intermediate_states = []
+        extracted_kv_cache = [] if extract_kv else None
         for index_block, block in enumerate(self.transformer_blocks):
-            encoder_hidden_states, hidden_states = block(
+            # Get original KV for this layer if available
+            layer_original_kv = None
+            if original_kv_cache is not None and index_block < len(original_kv_cache):
+                layer_original_kv = original_kv_cache[index_block]
+            
+            block_output = block(
                 hidden_states=hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_hidden_states_mask=encoder_hidden_states_mask,
@@ -759,7 +879,17 @@ class QwenImageTransformer2DModel(nn.Module):
                 image_rotary_emb=image_rotary_emb,
                 joint_attention_kwargs=attention_kwargs,
                 modulate_index=modulate_index,
+                frozen_mask=frozen_mask,
+                extract_kv=extract_kv,
+                original_kv=layer_original_kv,
             )
+            
+            if extract_kv:
+                encoder_hidden_states, hidden_states, layer_kv_info = block_output
+                extracted_kv_cache.append(layer_kv_info)
+            else:
+                encoder_hidden_states, hidden_states = block_output
+            
             if return_intermediate:
                 intermediate_states.append(hidden_states)
 
@@ -773,6 +903,10 @@ class QwenImageTransformer2DModel(nn.Module):
             output = get_sp_group().all_gather(output, dim=-2)
         
         if not return_dict:
+            if extract_kv:
+                if return_intermediate:
+                    return (output, intermediate_states, extracted_kv_cache)
+                return (output, extracted_kv_cache)
             if return_intermediate:
                 return (output, intermediate_states)
             return (output,)

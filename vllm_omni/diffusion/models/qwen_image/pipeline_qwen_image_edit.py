@@ -596,6 +596,35 @@ class QwenImageEditPipeline(
         self.scheduler.set_begin_index(0)
         prev_pred_x0 = None
         frozen_mask = None  # tokens frozen to image_latents for all following steps
+        original_kv_cache = None  # KV cache extracted from original image forward pass
+        
+        # Extract KV from original image latents if available
+        # This is done once before the diffusion loop to get the KV tensors for frozen positions
+        if image_latents is not None:
+            # Create timestep for the original image (use t=0 or the first timestep)
+            batch_size = image_latents.shape[0]
+            first_timestep = timesteps[0].expand(batch_size).to(device=image_latents.device, dtype=image_latents.dtype)
+            
+            # Forward pass on original image latents to extract KV
+            # We use only image_latents (not concatenated with noise) as input
+            # to get the KV corresponding to the original image tokens
+            original_kv_kwargs = {
+                "hidden_states": image_latents,
+                "timestep": first_timestep / 1000,
+                "guidance": guidance,
+                "encoder_hidden_states_mask": prompt_embeds_mask,
+                "encoder_hidden_states": prompt_embeds,
+                "img_shapes": img_shapes,
+                "txt_seq_lens": txt_seq_lens,
+                "attention_kwargs": self.attention_kwargs,
+                "return_dict": False,
+                "extract_kv": True,
+            }
+            
+            # Extract KV cache from all layers
+            _, original_kv_cache = self.transformer(**original_kv_kwargs)
+            print(f"Extracted KV cache from original image, {len(original_kv_cache)} layers")
+        
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -638,6 +667,8 @@ class QwenImageEditPipeline(
                 "txt_seq_lens": txt_seq_lens,
                 "attention_kwargs": self.attention_kwargs,
                 "return_dict": False,
+                "frozen_mask": frozen_mask,
+                "original_kv_cache": original_kv_cache,
             }
             if self._cache_backend is not None:
                 transformer_kwargs["cache_branch"] = "positive"
@@ -658,6 +689,8 @@ class QwenImageEditPipeline(
                     "txt_seq_lens": negative_txt_seq_lens,
                     "attention_kwargs": self.attention_kwargs,
                     "return_dict": False,
+                    "frozen_mask": frozen_mask,
+                    "original_kv_cache": original_kv_cache,
                 }
                 if self._cache_backend is not None:
                     neg_transformer_kwargs["cache_branch"] = "negative"
